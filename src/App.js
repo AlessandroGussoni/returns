@@ -11,6 +11,7 @@ import {
   ReferenceLine 
 } from 'recharts';
 
+
 const DATA = [{"year": 1928, "S&P500": "43,81", "tbill_3m": "3,08", "usbond_10y": "0,84", "real_estate": "1,49", "gold": "0,10"}, 
   {"year": 1929, "S&P500": "-8,30", "tbill_3m": "3,16", "usbond_10y": "4,20", "real_estate": "-2,06", "gold": "-0,15"}, 
   {"year": 1930, "S&P500": "-25,12", "tbill_3m": "4,55", "usbond_10y": "4,54", "real_estate": "-4,30", "gold": "0,10"}, 
@@ -124,6 +125,10 @@ const generateMockData = (startYear, endYear) => {
 const AssetComparisonChart = () => {
   const [startYear, setStartYear] = useState(2000);
   const [endYear, setEndYear] = useState(2023);
+  const [currentStartYear, setCurrentStartYear] = useState(2000);
+  const [currentEndYear, setCurrentEndYear] = useState(2023);
+  const [animationKey, setAnimationKey] = useState(0);
+
   const [data, setData] = useState(() => generateMockData(2000, 2023));
   const [isCumulative, setIsCumulative] = useState(false);
   const [portfolioMix, setPortfolioMix] = useState({
@@ -146,21 +151,21 @@ const AssetComparisonChart = () => {
   });
 
   useEffect(() => {
-    const total = Object.entries(portfolioMix)
-      .filter(([asset]) => visibleAssets[asset])
-      .reduce((sum, [, value]) => sum + value, 0);
+    const total = Object.values(portfolioMix).reduce((sum, value) => sum + value, 0);
     setTotalPercentage(total);
-  }, [portfolioMix, visibleAssets]);
+  }, [portfolioMix]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    setCurrentStartYear(parseInt(startYear));
+    setCurrentEndYear(parseInt(endYear));
     setData(generateMockData(parseInt(startYear), parseInt(endYear)));
   };
 
   const handlePortfolioMixChange = (asset, value) => {
     const newValue = parseInt(value) || 0;
     const otherAssetsTotal = Object.entries(portfolioMix)
-      .filter(([key]) => key !== asset && visibleAssets[key])
+      .filter(([key]) => key !== asset)
       .reduce((sum, [, val]) => sum + val, 0);
     
     const cappedValue = Math.min(newValue, 100 - otherAssetsTotal);
@@ -171,49 +176,65 @@ const AssetComparisonChart = () => {
   const toggleAssetVisibility = (asset) => {
     setVisibleAssets(prev => ({...prev, [asset]: !prev[asset]}));
   };
+  const toggleCumulative = () => {
+    setIsCumulative(!isCumulative);
+    setShowPortfolioValue(false);
+    setAnimationKey(prevKey => prevKey + 1);
+  };
+
+  const togglePortfolioValue = () => {
+    setShowPortfolioValue(!showPortfolioValue);
+    setAnimationKey(prevKey => prevKey + 1);
+    if (!showPortfolioValue) {
+      // When switching to portfolio value, hide other assets
+      setVisibleAssets(prev => Object.fromEntries(Object.entries(prev).map(([key, value]) => [key, key === 'Portfolio'])));
+    } else {
+      // When switching back, show all assets
+      setVisibleAssets(prev => Object.fromEntries(Object.entries(prev).map(([key, value]) => [key, true])));
+    }
+  };
 
   const processedData = useMemo(() => {
     let processedData = data.map(yearData => ({...yearData}));
     if (isCumulative) {
-      let cumulativeValues = {...visibleAssets, 'Portfolio': 1};
+      let cumulativeValues = {...portfolioMix, 'Portfolio': 1};
+      let baseValues = {...portfolioMix, 'Portfolio': 1};
       processedData = processedData.map(yearData => {
+        if (yearData.year < currentStartYear) {
+          return { year: yearData.year };
+        }
         let newYearData = {year: yearData.year};
-        for (let asset in cumulativeValues) {
-          if (asset !== 'Portfolio' && visibleAssets[asset]) {
-            cumulativeValues[asset] = (cumulativeValues[asset] || 1) * (1 + yearData[asset]);
-            newYearData[asset] = parseFloat((cumulativeValues[asset] - 1).toFixed(4));
-          }
+        for (let asset in portfolioMix) {
+          cumulativeValues[asset] = (cumulativeValues[asset] || baseValues[asset]) * (1 + yearData[asset]);
+          newYearData[asset] = parseFloat(((cumulativeValues[asset] / baseValues[asset]) - 1).toFixed(4));
         }
         // Calculate portfolio performance
         const portfolioReturn = Object.keys(portfolioMix)
-          .filter(asset => visibleAssets[asset])
           .reduce((sum, asset) => {
             return sum + (yearData[asset] * (portfolioMix[asset] / 100));
           }, 0);
         cumulativeValues['Portfolio'] *= (1 + portfolioReturn);
-        newYearData['Portfolio'] = parseFloat((cumulativeValues['Portfolio'] - 1).toFixed(4));
+        newYearData['Portfolio'] = parseFloat(((cumulativeValues['Portfolio'] / baseValues['Portfolio']) - 1).toFixed(4));
         
-        if (showPortfolioValue) {
-          newYearData['Portfolio Value'] = parseFloat((investment * cumulativeValues['Portfolio']).toFixed(2));
-        }
+        newYearData['Portfolio Value'] = parseFloat((investment * cumulativeValues['Portfolio']).toFixed(2));
         
         return newYearData;
       });
     } else {
       processedData = processedData.map(yearData => {
         const portfolioReturn = Object.keys(portfolioMix)
-          .filter(asset => visibleAssets[asset])
           .reduce((sum, asset) => {
             return sum + (yearData[asset] * (portfolioMix[asset] / 100));
           }, 0);
         return {...yearData, 'Portfolio': parseFloat(portfolioReturn.toFixed(4))};
       });
     }
-    return processedData;
-  }, [data, isCumulative, portfolioMix, investment, showPortfolioValue, visibleAssets]);
+    return processedData.filter(yearData => yearData.year >= currentStartYear);
+  }, [data, isCumulative, portfolioMix, investment, currentStartYear]);
 
-  const assets = ['Portfolio', 'S&P 500', 'Gold', 'Bonds', 'T-Bills', 'Real Estate', ];
-  const colors = ['#21b6a8', '#8884d8', '#ffc658', '#ff7300', '#82ca9d', '#e28743', ];
+
+  const assets = ['Portfolio', 'S&P 500', 'Gold', 'Bonds', 'T-Bills', 'Real Estate'];
+  const colors = ['#21b6a8', '#8884d8', '#ffc658', '#ff7300', '#82ca9d', '#e28743'];
 
   const styles = {
     container: {
@@ -232,10 +253,11 @@ const AssetComparisonChart = () => {
       backgroundColor: '#f3f4f6',
     },
     title: {
-      fontSize: '24px',
+      fontSize: '28px',  // Increased from 24px
       fontWeight: 'bold',
       color: '#2563eb',
       marginBottom: '8px',
+      fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif',  // Changed font
     },
     subtitle: {
       color: '#4b5563',
@@ -261,9 +283,16 @@ const AssetComparisonChart = () => {
     },
     input: {
       width: '100px',
-      padding: '4px 8px',
+      padding: '8px 12px',
       border: '1px solid #d1d5db',
       borderRadius: '4px',
+      fontSize: '14px',
+      transition: 'border-color 0.3s',
+      '&:focus': {
+        outline: 'none',
+        borderColor: '#3b82f6',
+        boxShadow: '0 0 0 3px rgba(59, 130, 246, 0.3)',
+      },
     },
     button: {
       backgroundColor: '#3b82f6',
@@ -272,17 +301,22 @@ const AssetComparisonChart = () => {
       border: 'none',
       borderRadius: '4px',
       cursor: 'pointer',
+      transition: 'background-color 0.3s',
+      '&:hover': {
+        backgroundColor: '#2563eb',
+      },
     },
     portfolioMix: {
       backgroundColor: '#f3f4f6',
       padding: '16px',
       borderRadius: '8px',
       width: '100%',
+      marginTop: '24px',  // Added vertical spacing
     },
     portfolioMixTitle: {
       fontSize: '18px',
       fontWeight: 'bold',
-      marginBottom: '8px',
+      marginBottom: '16px',  // Increased from 8px
       textAlign: 'center',
     },
     assetInputs: {
@@ -321,8 +355,24 @@ const AssetComparisonChart = () => {
       cursor: 'pointer',
       transition: 'background-color 0.3s',
     },
+    cumulativeButton: {
+      backgroundColor: '#f3f4f6',
+      color: '#4b5563',
+      padding: '8px 16px',
+      border: '1px solid #d1d5db',
+      borderRadius: '4px',
+      cursor: 'pointer',
+      transition: 'all 0.3s',
+      '&:hover': {
+        backgroundColor: '#e5e7eb',
+      },
+      '&.active': {
+        backgroundColor: '#3b82f6',
+        color: 'white',
+        borderColor: '#3b82f6',
+      },
+    },
   };
-
 
   return (
     <div style={styles.container}>
@@ -357,20 +407,6 @@ const AssetComparisonChart = () => {
             </div>
             <button type="submit" style={styles.button}>Update Chart</button>
           </div>
-          <div style={styles.inputGroup}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input
-                id="cumulative-mode"
-                type="checkbox"
-                checked={isCumulative}
-                onChange={(e) => {
-                  setIsCumulative(e.target.checked);
-                  setShowPortfolioValue(false);
-                }}
-              />
-              <label htmlFor="cumulative-mode">Cumulative Returns</label>
-            </div>
-          </div>
           <div style={styles.portfolioMix}>
             <h2 style={styles.portfolioMixTitle}>Portfolio Mix</h2>
             <div style={styles.assetInputs}>
@@ -397,28 +433,37 @@ const AssetComparisonChart = () => {
               Total: {totalPercentage}% {totalPercentage > 100 ? '(Capped at 100%)' : ''}
             </div>
             <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px' }}>
-              <div>
-                <label htmlFor="investment" style={styles.label}>Investment Amount:</label>
-                <input
-                  id="investment"
-                  type="number"
-                  value={investment}
-                  onChange={(e) => setInvestment(parseFloat(e.target.value) || 0)}
-                  style={{ ...styles.input, width: '120px' }}
-                />
-              </div>
-              <button
-                onClick={() => setShowPortfolioValue(!showPortfolioValue)}
-                disabled={!isCumulative}
-                style={{
-                  ...styles.button,
-                  backgroundColor: !isCumulative ? '#9ca3af' : '#3b82f6',
-                  cursor: !isCumulative ? 'not-allowed' : 'pointer',
-                }}
-              >
-                {showPortfolioValue ? 'Show Returns' : 'Show Portfolio Value'}
-              </button>
-            </div>
+        <div>
+          <label htmlFor="investment" style={styles.label}>Investment Amount:</label>
+          <input
+            id="investment"
+            type="number"
+            value={investment}
+            onChange={(e) => setInvestment(parseFloat(e.target.value) || 0)}
+            style={{ ...styles.input, width: '120px' }}
+          />
+        </div>
+        <button
+          onClick={toggleCumulative}
+          style={{
+            ...styles.cumulativeButton,
+            ...(isCumulative ? styles.cumulativeButton.active : {}),
+          }}
+        >
+          {isCumulative ? 'Annual Returns': 'Cumulative Returns'}
+        </button>
+        <button
+          onClick={togglePortfolioValue}  // This line has been updated
+          disabled={!isCumulative}
+          style={{
+            ...styles.button,
+            backgroundColor: !isCumulative ? '#9ca3af' : '#3b82f6',
+            cursor: !isCumulative ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {showPortfolioValue ? 'Show Returns' : 'Show Portfolio Value'}
+        </button>
+      </div>
           </div>
         </form>
         <div style={styles.assetToggle}>
@@ -443,42 +488,49 @@ const AssetComparisonChart = () => {
           </div>
         )}
         <ResponsiveContainer width="100%" height={400}>
-          <LineChart data={processedData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="year" />
-            <YAxis 
-              tickFormatter={(value) => 
-                showPortfolioValue
-                  ? `$${value.toLocaleString()}`
-                  : `${(value * 100).toFixed(0)}%`
-              } 
-            />
-            <Tooltip 
-              formatter={(value, name) => [
-                showPortfolioValue && name === 'Portfolio Value'
-                  ? `$${value.toLocaleString()}`
-                  : `${(value * 100).toFixed(2)}%`,
-                name
-              ]}
-            />
-            <Legend />
-            <ReferenceLine y={0} stroke="#000" />
-            {assets.map((asset, index) => (
-              visibleAssets[asset] && (
-                <Line
-                  key={asset}
-                  type="monotone"
-                  dataKey={showPortfolioValue && asset === 'Portfolio' ? 'Portfolio Value' : asset}
-                  name={asset}
-                  stroke={colors[index]}
-                  strokeWidth={asset === 'Portfolio' ? 3 : 2}
-                  dot={false}
-                />
-              )
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
+        <LineChart data={processedData} key={animationKey}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis dataKey="year" />
+          <YAxis 
+            tickFormatter={(value) => 
+              showPortfolioValue
+                ? `$${value.toLocaleString()}`
+                : `${(value * 100).toFixed(0)}%`
+            } 
+          />
+          <Tooltip 
+            formatter={(value, name) => [
+              showPortfolioValue && name === 'Portfolio Value'
+                ? `$${value.toLocaleString()}`
+                : `${(value * 100).toFixed(2)}%`,
+              name
+            ]}
+          />
+          <Legend 
+            formatter={(value) => 
+              showPortfolioValue && value === 'Portfolio Value'
+                ? 'Portfolio Value ($)'
+                : value
+            }
+          />
+          <ReferenceLine y={0} stroke="#000" />
+          {assets.map((asset, index) => (
+            visibleAssets[asset] && (
+              <Line
+                key={asset}
+                type="monotone"
+                dataKey={showPortfolioValue && asset === 'Portfolio' ? 'Portfolio Value' : asset}
+                name={showPortfolioValue && asset === 'Portfolio' ? 'Portfolio Value' : asset}
+                stroke={colors[index]}
+                strokeWidth={asset === 'Portfolio' ? 3 : 2}
+                dot={true}
+                animationDuration={600}
+              />
+            )
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
     </div>
   );
 };
