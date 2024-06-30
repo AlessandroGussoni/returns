@@ -10,6 +10,7 @@ import {
   ResponsiveContainer, 
   ReferenceLine 
 } from 'recharts';
+import { SpeedInsights } from "@vercel/speed-insights/react"
 
 
 const DATA = [{"year": 1928, "S&P500": "43,81", "tbill_3m": "3,08", "usbond_10y": "0,84", "real_estate": "1,49", "gold": "0,10"}, 
@@ -529,6 +530,7 @@ const AssetComparisonChart = () => {
             )
           ))}
         </LineChart>
+        <SpeedInsights />
       </ResponsiveContainer>
     </div>
     </div>
